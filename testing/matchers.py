@@ -9,6 +9,7 @@ def default(s, *, it, i, e):
         "actual": s(*i)
     }
 
+
 @_
 def plain(s, *, it, i, e):
     return {
@@ -16,6 +17,7 @@ def plain(s, *, it, i, e):
         "expected": e,
         "actual": i
     }
+
 
 @_
 def compare(s, *, it, e):

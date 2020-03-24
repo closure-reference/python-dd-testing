@@ -1,6 +1,7 @@
 def my_map(func, list_):
     return [func(x) for x in list_]
 
+
 my_map2 = my_map
 
 

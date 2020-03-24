@@ -1,3 +1,4 @@
+import importlib
 import json
 from colorama import Fore, Back, Style
 import os
@@ -22,29 +23,44 @@ def all_files(folder):
 
 
 def run_file(file):
+    importlib.invalidate_caches()
     if isinstance(file, str):
-        run_config(get_config(open(get_path(file))))
-    else:
-        run_config(get_config(file))
+        file = open(get_path(file))
+    run_config(get_config(file))
 
 
 def get_tests_for_module(module_filename, code_path, test_path):
     module_path = os.path.join(code_path, module_filename)
     module_name = module_filename.replace(".py", "")
-    module = run_path(module_path)
+    try:
+        sys.path.insert(1, os.path.split(module_path)[0])
+        module = run_path(module_path)
+        return {
+            "name": module_name,
+            "path": module_path,
+            "testables": [*filter(lambda t: os.path.isfile(t["unittest_path"]),
+                                  [
+                                    {
+                                     "name":
+                                         name,
+                                     "unittest_path":
+                                         os.path.join(
+                                                      test_path,
+                                                      module_name,
+                                                      name + ".py"
+                                                     )
+                                    }
+                                   for name in module
+                                   if not name.startswith("_")
+                                   ])
+                         ]
+        }
+    except Exception as e:
+        print(Back.RED + Fore.WHITE
+              + f"Error trying to import {module_path}: {e}"
+              + Style.RESET_ALL)
+        return None
 
-    testables = [*filter(lambda t: os.path.isfile(t["unittest_path"]),
-                         [{"name": name,
-                           "unittest_path": os.path.join(test_path,
-                                                         module_name,
-                                                         name + ".py")}
-                           for name in module if not name.startswith("_")])]
-
-    return {
-        "name": module_name,
-        "path": module_path,
-        "testables": testables
-    }
 
 
 def get_config(file):
@@ -56,8 +72,12 @@ def get_config(file):
         test_path = get_path(test_location)
         code_path = get_path(code_location)
 
-        output.append([get_tests_for_module(module_file, code_path, test_path)
-                       for module_file in os.listdir(code_path)])
+        output.append(list(filter(
+                       None,
+                       [get_tests_for_module(module_file, code_path, test_path)
+                        for module_file in os.listdir(code_path)
+                        if module_file.endswith(".py")]
+                      )))
 
     return output
 
@@ -84,24 +104,39 @@ def test_testable(module, module_name, *, name, unittest_path):
     else:
         tester(driver, module)
 
-    print_driver_results(f"{module_name}::{name}", driver.tests)
+    print_driver_results(f"{module_name}::{name}",
+                         module["__doc__"],
+                         driver.tests)
 
 
-def print_driver_results(name, tests):
+def print_driver_results(name, doc, tests):
     print(Style.BRIGHT + name + Style.RESET_ALL)
+    print(doc or Back.MAGENTA + Fore.WHITE + "no docstring!" + Style.RESET_ALL)
     for context, test_results in tests.items():
-        indent = (len(context) + 1) * "     "
+        indent = (len(context)) * "     "
         if context:
             print(indent + Fore.CYAN + context[-1] + Style.RESET_ALL)
+        indent += "     "
         for test_result in test_results:
-            print(indent + str_result(test_result))
+            print(str_result(test_result, indent))
 
 
-def str_result(result):
+def align(s, indent):
+    return ("\n" + indent).join(s.split("\n"))
+
+def str_result(result, indent):
+    title = align(result["title"], indent + "  ")
     if result["expected"] == result["actual"]:
-        return Fore.GREEN + "V " + Style.RESET_ALL + result["title"]
+        return indent + Fore.GREEN + "V " + Style.RESET_ALL + title
     else:
-        return Fore.RED + "X " + result["title"] + Style.RESET_ALL
+        return "\n" \
+               + indent + Fore.RED + f"X {title}" \
+               + "\n" \
+               + indent + Fore.RED + f"   - expected ({result['expected']})" \
+               + "\n" \
+               + indent + Fore.GREEN + f"   + actual ({result['actual']})" \
+               + Style.RESET_ALL \
+               + "\n"
 
 
 def match(subject, test):
@@ -123,9 +158,17 @@ class Driver:
         self.context = context
         self.tests = {}
 
-    def __call__(self, new_context):
-        self.context.append(new_context)
+    def __call__(self, *args, **kwargs):
+        if args:
+            [ctx] = args
+            self.with_new_context(ctx)
+        else:
+            self@kwargs
+
         return self
+
+    def with_new_context(self, new_context):
+        self.context.append(new_context)
 
     def __enter__(self):
         return self
@@ -149,3 +192,6 @@ class Driver:
 
     def __repr__(self):
         return "Driver(" + repr(self.subject) + ", " + repr(self.context) + ")"
+
+
+__all__ = ["run_file"]
